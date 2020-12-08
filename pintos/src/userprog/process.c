@@ -46,6 +46,15 @@ tid_t process_execute(const char* file_name) {
   return tid;
 }
 
+/* Writes BYTE to user address UDST.
+   UDST must be below PHYS_BASE.
+   Returns true if successful, false if a segfault occurred. */
+static bool put_user(uint8_t* udst, uint8_t byte) {
+  int error_code;
+  asm("movl $1f, %0; movb %b2, %1; 1:" : "=&a"(error_code), "=m"(*udst) : "q"(byte));
+  return error_code != -1;
+}
+
 /* A thread function that loads a user process and starts it
    running. */
 static void start_process(void* file_name_) {
@@ -196,7 +205,8 @@ static bool load_segment(struct file* file, off_t ofs, uint8_t* upage, uint32_t 
    Stores the executable's entry point into *EIP
    and its initial stack pointer into *ESP.
    Returns true if successful, false otherwise. */
-bool load(const char* file_name, void (**eip)(void), void** esp) {
+bool load(const char* file_name2, void (**eip)(void), void** esp) {
+  char* file_name = file_name2;
   struct thread* t = thread_current();
   struct Elf32_Ehdr ehdr;
   struct file* file = NULL;
@@ -210,6 +220,23 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
     goto done;
   process_activate();
 
+  int argc = 1;
+  int num_chars = 0;
+  int strlen = 0;
+  int firstspace = -1;
+  for (int i = 0; file_name[i] != '\0'; i++) {
+    if (i && file_name[i] != ' ' && file_name[i - 1] == ' ') {
+      argc++;
+    }
+    if (file_name[i] != ' ')
+      num_chars++;
+    if (file_name[i] == ' ' && firstspace == -1)
+      firstspace = i;
+    strlen++;
+  }
+
+  file_name[firstspace] = '\0';
+  (thread_current()->name)[firstspace] = '\0';
   /* Open executable file. */
   file = filesys_open(file_name);
   if (file == NULL) {
@@ -282,6 +309,40 @@ bool load(const char* file_name, void (**eip)(void), void** esp) {
   /* Start address. */
   *eip = (void (*)(void))ehdr.e_entry;
 
+  // Start setting up argc and argv on stack. Also make it 16 byte aligned
+  // First figure out argc
+
+  file_name[firstspace] = ' ';
+  int bytes_req = num_chars + argc + 4 + 4 + (argc + 1) * 4;
+  uint32_t _esp = (((uint32_t)(*esp) - bytes_req) / 16) * 16 - 4;
+
+  uint8_t* stack_pointer = (uint8_t*)(*esp);
+  uint32_t* stack_pointer_2 = (uint32_t*)_esp;
+
+  stack_pointer_2[0] = 0;
+  stack_pointer_2[1] = argc;
+  stack_pointer_2[2] = (uint32_t)(&stack_pointer_2[3]);
+  stack_pointer_2[argc + 3] = 0;
+  stack_pointer--;
+  *stack_pointer = '\0';
+  for (int i = strlen - 1; i >= 0; i--) {
+    if (file_name[i] != ' ') {
+      stack_pointer--;
+      *stack_pointer = file_name[i];
+    } else if (i != strlen - 1 && file_name[i] == ' ' && file_name[i + 1] != ' ') {
+      stack_pointer_2[3 + (argc - 1)] = (uint32_t)stack_pointer;
+      stack_pointer--;
+      *stack_pointer = '\0';
+      argc--;
+    }
+
+    if (i == 0) {
+      stack_pointer_2[3] = (uint32_t)stack_pointer;
+    }
+  }
+  file_name[firstspace] = '\0';
+
+  (*esp) = stack_pointer_2;
   success = true;
 
 done:
