@@ -25,6 +25,8 @@ typedef int tid_t;
 #define PRI_DEFAULT 31 /* Default priority. */
 #define PRI_MAX 63     /* Highest priority. */
 
+struct child_thread;
+
 /* A kernel thread or user process.
 
    Each thread structure is stored in its own 4 kB page.  The
@@ -96,10 +98,23 @@ struct thread {
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint32_t* pagedir; /* Page directory. */
+
+  /* Shared between thread.c and process.c */
+  struct thread* parent_process;
+  struct list child_lst;
+
 #endif
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
+};
+
+struct child_thread {
+  tid_t tid;
+  struct semaphore wait;
+  int exit_code;
+  int waiting;
+  struct list_elem elem;
 };
 
 /* If false (default), use round-robin scheduler.
@@ -120,10 +135,14 @@ void thread_block(void);
 void thread_unblock(struct thread*);
 
 struct thread* thread_current(void);
+struct thread* thread_from_tid(tid_t tid);
 tid_t thread_tid(void);
 const char* thread_name(void);
 
+struct child_thread* thread_child_id(struct thread* parent, tid_t tid);
+
 void thread_exit(void) NO_RETURN;
+void set_exit_code(int);
 void thread_yield(void);
 
 /* Performs some operation on thread t, given auxiliary data AUX. */

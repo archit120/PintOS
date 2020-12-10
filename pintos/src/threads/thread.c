@@ -246,6 +246,48 @@ struct thread* thread_current(void) {
   return t;
 }
 
+struct thread* thread_from_tid(tid_t tid) {
+  struct thread* t = NULL;
+  enum intr_level old_level;
+  struct list_elem* e;
+
+  old_level = intr_disable();
+  for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+    t = list_entry(e, struct thread, allelem);
+    if (t->tid == tid)
+      break;
+  }
+  intr_set_level(old_level);
+
+  /* Make sure T is really a thread. */
+  ASSERT(is_thread(t));
+
+  return t;
+}
+
+struct child_thread* thread_child_id(struct thread* parent, tid_t tid) {
+  struct child_thread* t = NULL;
+  enum intr_level old_level;
+  struct list_elem* e;
+
+  old_level = intr_disable();
+  for (e = list_begin(&parent->child_lst); e != list_end(&parent->child_lst); e = list_next(e)) {
+    t = list_entry(e, struct child_thread, elem);
+    if (t->tid == tid)
+      break;
+  }
+  intr_set_level(old_level);
+  return t;
+}
+
+void raise_waiter() {
+  struct thread* parent = thread_current()->parent_process;
+  if (parent == NULL)
+    return;
+  struct child_thread* cht = thread_child_id(parent, thread_current()->tid);
+  sema_up(&cht->wait);
+}
+
 /* Returns the running thread's tid. */
 tid_t thread_tid(void) { return thread_current()->tid; }
 
@@ -263,9 +305,20 @@ void thread_exit(void) {
      when it calls thread_schedule_tail(). */
   intr_disable();
   list_remove(&thread_current()->allelem);
+
+  raise_waiter();
   thread_current()->status = THREAD_DYING;
+
   schedule();
   NOT_REACHED();
+}
+
+void set_exit_code(int exit_code) {
+  struct thread* parent = thread_current()->parent_process;
+  if (parent == NULL)
+    return;
+  struct child_thread* cht = thread_child_id(parent, thread_current()->tid);
+  cht->exit_code = exit_code;
 }
 
 /* Yields the CPU.  The current thread is not put to sleep and
@@ -398,6 +451,11 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   strlcpy(t->name, name, sizeof t->name);
   t->stack = (uint8_t*)t + PGSIZE;
   t->priority = priority;
+
+  list_init(&t->child_lst);
+  t->parent_process = NULL;
+  // list t->child_lst
+
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable();
@@ -467,6 +525,13 @@ void thread_schedule_tail(struct thread* prev) {
      palloc().) */
   if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) {
     ASSERT(prev != cur);
+
+    // free elements on the child_lst too
+    while (!list_empty(&prev->child_lst)) {
+      struct list_elem* e = list_pop_front(&prev->child_lst);
+      free(list_entry(e, struct child_thread, elem));
+    }
+
     palloc_free_page(prev);
   }
 }
