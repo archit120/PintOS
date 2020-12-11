@@ -453,7 +453,11 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   t->priority = priority;
 
   list_init(&t->child_lst);
+  list_init(&t->files_lst);
   t->parent_process = NULL;
+  t->loaded = -1;
+  t->file_allocd = 2;
+  sema_init(&t->load, 0);
   // list t->child_lst
 
   t->magic = THREAD_MAGIC;

@@ -41,11 +41,44 @@ bool check_memory_str(char* start) {
   return check_memory(start, sz);
 }
 
+void bad_exit() {
+  printf("%s: exit(-1)\n", &thread_current()->name);
+  thread_exit();
+}
+
+struct file* fd_to_file(int fd) {
+  /* data */
+  struct file_descriptor* ds = NULL;
+  struct list_elem* e;
+
+  for (e = list_begin(&thread_current()->files_lst); e != list_end(&thread_current()->files_lst);
+       e = list_next(e)) {
+    ds = list_entry(e, struct file_descriptor, elem);
+    if (ds->fd == fd)
+      break;
+  }
+
+  if (ds == NULL)
+    bad_exit();
+  return ds->fp;
+};
+
+int file_add(struct file* fp) {
+  if (fp == NULL)
+    return -1;
+  int fd = (thread_current()->file_allocd++);
+  struct file_descriptor* ds = malloc(sizeof(struct file_descriptor));
+  ds->fd = fd;
+  ds->fp = fp;
+  list_push_front(&thread_current()->files_lst, &ds->elem);
+  return fd;
+}
+
 int write(int fd, const void* buffer, unsigned size) {
   if (fd == 1)
     return printf("%.*s", size, (const char*)buffer);
 
-  return file_write(fd, buffer, size);
+  return file_write(fd_to_file(fd), buffer, size);
 }
 
 static void syscall_handler(struct intr_frame* f UNUSED) {
@@ -85,28 +118,28 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
         f->eax = filesys_create(args[1], args[2]);
         break;
       case SYS_OPEN:
-        f->eax = filesys_open(args[1]);
+        f->eax = file_add(filesys_open(args[1]));
         break;
 
       case SYS_FILESIZE:
-        f->eax = file_length(args[1]);
+        f->eax = file_length(fd_to_file(args[1]));
         // TODO
         break;
 
       case SYS_READ:
-        f->eax = file_read(args[1], args[2], args[3]);
+        f->eax = file_read(fd_to_file(args[1]), args[2], args[3]);
         break;
 
       case SYS_SEEK:
-        file_seek(args[1], args[2]);
+        file_seek(fd_to_file(args[1]), args[2]);
         break;
 
       case SYS_TELL:
-        f->eax = file_tell(args[1]);
+        f->eax = file_tell(fd_to_file(args[1]));
         break;
 
       case SYS_CLOSE:
-        file_close(args[1]);
+        file_close(fd_to_file(args[1]));
         break;
 
       case SYS_REMOVE:

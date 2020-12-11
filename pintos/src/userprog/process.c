@@ -31,7 +31,6 @@ tid_t process_execute(const char* file_name) {
   char* fn_copy;
   tid_t tid;
 
-  sema_init(&temporary, 0);
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
   fn_copy = palloc_get_page(0);
@@ -52,6 +51,11 @@ tid_t process_execute(const char* file_name) {
     cht->tid = tid;
     cht->waiting = 0;
     list_push_front(&thread_current()->child_lst, &cht->elem);
+
+    sema_down(&t->load);
+    ASSERT(t->loaded != -1);
+    if (t->loaded == 0)
+      return -1;
   }
   return tid;
 }
@@ -69,7 +73,9 @@ static void start_process(void* file_name_) {
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load(file_name, &if_.eip, &if_.esp);
+  thread_current()->loaded = success;
 
+  sema_up(&thread_current()->load);
   /* If load failed, quit. */
   palloc_free_page(file_name);
   if (!success)
@@ -129,7 +135,7 @@ void process_exit(void) {
     pagedir_activate(NULL);
     pagedir_destroy(pd);
   }
-  sema_up(&temporary);
+  // sema_up(&temporary);
 }
 
 /* Sets up the CPU for running user code in the current

@@ -98,12 +98,17 @@ struct thread {
 #ifdef USERPROG
   /* Owned by userprog/process.c. */
   uint32_t* pagedir; /* Page directory. */
+#endif
 
   /* Shared between thread.c and process.c */
   struct thread* parent_process;
   struct list child_lst;
 
-#endif
+  int file_allocd;
+  struct list files_lst;
+
+  int8_t loaded;
+  struct semaphore load;
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
@@ -114,6 +119,12 @@ struct child_thread {
   struct semaphore wait;
   int exit_code;
   int waiting;
+  struct list_elem elem;
+};
+
+struct file_descriptor {
+  int fd;
+  struct file* fp;
   struct list_elem elem;
 };
 
