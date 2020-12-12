@@ -43,18 +43,13 @@ tid_t process_execute(const char* file_name) {
   if (tid == TID_ERROR)
     palloc_free_page(fn_copy);
   else {
-    struct thread* t = thread_from_tid(tid);
-    t->parent_process = thread_current();
-    struct child_thread* cht = malloc(sizeof(struct child_thread));
-    cht->exit_code = -1; //assume if not given.
-    sema_init(&cht->wait, 0);
-    cht->tid = tid;
-    cht->waiting = 0;
-    list_push_front(&thread_current()->child_lst, &cht->elem);
+    struct child_thread* t = thread_child_id(thread_current(), tid);
+    sema_down(&t->load_sema);
+    // printf("Value of loaded is %d from %x\n", t->loaded_result, (&t->temp_check));
 
-    sema_down(&t->load);
-    ASSERT(t->loaded != -1);
-    if (t->loaded == 0)
+    ASSERT(t->temp_check == 11);
+
+    if (!t->loaded_result)
       return -1;
   }
   return tid;
@@ -73,9 +68,16 @@ static void start_process(void* file_name_) {
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load(file_name, &if_.eip, &if_.esp);
-  thread_current()->loaded = success;
+  struct thread* t = thread_current();
 
-  sema_up(&thread_current()->load);
+  struct child_thread* ctt = thread_child_id(t->parent_process, t->tid);
+  if (ctt != NULL) {
+    ctt->loaded_result = success;
+    ctt->temp_check = 11;
+
+    // printf("TID: %d, success: %d, memoryloc: %x\n", thread_current()->tid, ctt->loaded_result, &(ctt->temp_check));
+    sema_up(&ctt->load_sema);
+  }
   /* If load failed, quit. */
   palloc_free_page(file_name);
   if (!success)
@@ -105,6 +107,8 @@ int process_wait(tid_t child_tid) {
   // struct thread* t = thread_from_tid(child_tid);
   // if (t->parent_process == thread_current()) {
   struct child_thread* c = thread_child_id(thread_current(), child_tid);
+  if (c == NULL)
+    return -1;
   if (c->waiting)
     return -1; // lock is not necessary because a call to wait can not come from another thread.
   c->waiting = 1;
@@ -119,6 +123,11 @@ int process_wait(tid_t child_tid) {
 void process_exit(void) {
   struct thread* cur = thread_current();
   uint32_t* pd;
+
+  if (thread_current()->tfp != NULL) {
+    file_allow_write(thread_current()->tfp);
+    file_close(thread_current()->tfp);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -230,7 +239,7 @@ bool load(const char* file_name2, void (**eip)(void), void** esp) {
   off_t file_ofs;
   bool success = false;
   int i;
-
+  t->tfp = NULL;
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create();
   if (t->pagedir == NULL)
@@ -256,10 +265,12 @@ bool load(const char* file_name2, void (**eip)(void), void** esp) {
   (thread_current()->name)[firstspace] = '\0';
   /* Open executable file. */
   file = filesys_open(file_name);
+  t->tfp = file;
   if (file == NULL) {
     printf("load: %s: open failed\n", file_name);
     goto done;
   }
+  file_deny_write(file);
 
   /* Read and verify executable header. */
   if (file_read(file, &ehdr, sizeof ehdr) != sizeof ehdr ||
@@ -364,7 +375,14 @@ bool load(const char* file_name2, void (**eip)(void), void** esp) {
 
 done:
   /* We arrive here whether the load is successful or not. */
-  file_close(file);
+  if (!success) {
+    if (t->tfp != NULL) {
+      file_allow_write(file);
+      file_close(file);
+      t->tfp = NULL;
+    }
+  } else
+    t->tfp = file;
   return success;
 }
 

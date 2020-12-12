@@ -107,8 +107,7 @@ struct thread {
   int file_allocd;
   struct list files_lst;
 
-  int8_t loaded;
-  struct semaphore load;
+  struct file* tfp;
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */
@@ -120,12 +119,17 @@ struct child_thread {
   int exit_code;
   int waiting;
   struct list_elem elem;
+
+  bool loaded_result;
+  struct semaphore load_sema;
+  int temp_check;
 };
 
 struct file_descriptor {
   int fd;
   struct file* fp;
   struct list_elem elem;
+  bool closed;
 };
 
 /* If false (default), use round-robin scheduler.

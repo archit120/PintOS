@@ -8,6 +8,7 @@
 #include "threads/pte.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "threads/palloc.h"
 
 static struct lock filesys_lock;
 
@@ -18,34 +19,81 @@ void syscall_init(void) {
   intr_register_int(0x30, 3, INTR_ON, syscall_handler, "syscall");
 }
 
-bool check_memory(void* start, int size) {
-  if (start + size > PHYS_BASE)
-    return false;
-  if (start < 0x08048000)
-    return false;
-  struct thread* t = thread_current();
-
-  for (uintptr_t i = pd_no(start); i <= pd_no(start + size); i++) {
-    uint32_t* pde = t->pagedir + i;
-    // printf("%x %x\n", pde, t->pagedir);
-    if (*pde == 0)
-      return false;
-  }
-  return true;
-}
-
-bool check_memory_str(char* start) {
-  int sz = 0;
-  while (start[sz++])
-    ;
-  return check_memory(start, sz);
-}
-
-void bad_exit() {
+void bad_exit(bool lock) {
+  if (lock)
+    lock_release(&filesys_lock);
   printf("%s: exit(-1)\n", &thread_current()->name);
   thread_exit();
 }
 
+bool check_memory(uint8_t* start, int size, bool lock) {
+  if (start + size > PHYS_BASE)
+    bad_exit(lock);
+  if (start < 0x08048000)
+    bad_exit(lock);
+  struct thread* t = thread_current();
+  uintptr_t target_pd_no = pd_no(start + size);
+  uintptr_t target_pt_no = pt_no(start + size);
+  uintptr_t current_pd_no = pd_no(start);
+  uintptr_t current_pt_no = pt_no(start);
+
+  for (; current_pd_no <= target_pd_no; current_pd_no++) {
+    uint32_t* pde = t->pagedir + current_pd_no;
+    if (*pde == 0)
+      bad_exit(lock);
+    uint32_t* pt = pde_get_pt(*pde);
+
+    for (; (current_pt_no < 1024) &&
+           ((current_pd_no < target_pd_no) || (current_pt_no <= target_pt_no));
+         current_pt_no += 1) {
+      // printf("pd: %d pg: %d \n", pd_no(current_pt), pg_no(current_pt));
+      // printf("tpd: %d tpg: %d \n", target_pd_no, target_pg_no);
+
+      if (!(pt[current_pt_no] & PTE_U || pt[current_pt_no] & PTE_P))
+        bad_exit(lock); //page table does not exist or is not owned by user.
+    }
+    current_pt_no = 0;
+  }
+  return true;
+}
+
+void check_int(void* loc, bool lock) { check_memory(loc, 4, lock); }
+
+bool check_memory_str(void* start_act, bool lock) {
+  int sz = 0;
+  check_int(start_act, lock);
+
+  uint8_t* start = (*(uint8_t**)start_act);
+
+  if (start < 0x08048000)
+    bad_exit(lock);
+  struct thread* t = thread_current();
+  uintptr_t current_pd_no = pd_no(start);
+  uintptr_t current_pt_no = pt_no(start);
+
+  for (;; current_pd_no++) {
+    uint32_t* pde = t->pagedir + current_pd_no;
+    if (*pde == 0)
+      bad_exit(lock);
+    uint32_t* pt = pde_get_pt(*pde);
+    for (; current_pt_no < 1024; current_pt_no += 1) {
+      // printf("pd: %d pg: %d \n", pd_no(current_pt), pg_no(current_pt));
+      // printf("tpd: %d tpg: %d \n", target_pd_no, target_pg_no);
+
+      if (!(pt[current_pt_no] & PTE_U || pt[current_pt_no] & PTE_P))
+        bad_exit(lock); //page table does not exist or is not owned by user.
+
+      //current page exists so try looking for null character here.
+      char* bckup = start;
+      while ((uintptr_t)start >> 12 == (uintptr_t)bckup >> 12) // iterate only in same page
+      {
+        if (*start == 0)
+          return true;
+        start++;
+      }
+    }
+  }
+}
 struct file* fd_to_file(int fd) {
   /* data */
   struct file_descriptor* ds = NULL;
@@ -59,9 +107,31 @@ struct file* fd_to_file(int fd) {
   }
 
   if (ds == NULL)
-    bad_exit();
+    bad_exit(true);
+  if (ds->closed)
+    bad_exit(true);
   return ds->fp;
-};
+}
+
+void close_fd(int fd) {
+  /* data */
+  struct file_descriptor* ds = NULL;
+  struct list_elem* e;
+
+  for (e = list_begin(&thread_current()->files_lst); e != list_end(&thread_current()->files_lst);
+       e = list_next(e)) {
+    ds = list_entry(e, struct file_descriptor, elem);
+    if (ds->fd == fd)
+      break;
+  }
+
+  if (ds == NULL)
+    bad_exit(true);
+  if (ds->closed)
+    bad_exit(true);
+  ds->closed = true;
+  file_close(ds->fp);
+}
 
 int file_add(struct file* fp) {
   if (fp == NULL)
@@ -70,6 +140,7 @@ int file_add(struct file* fp) {
   struct file_descriptor* ds = malloc(sizeof(struct file_descriptor));
   ds->fd = fd;
   ds->fp = fp;
+  ds->closed = false;
   list_push_front(&thread_current()->files_lst, &ds->elem);
   return fd;
 }
@@ -81,6 +152,9 @@ int write(int fd, const void* buffer, unsigned size) {
   return file_write(fd_to_file(fd), buffer, size);
 }
 
+// int read(int fd, void* buffer, unsigned size) {
+//   if()
+// }
 static void syscall_handler(struct intr_frame* f UNUSED) {
   uint32_t* args = ((uint32_t*)f->esp);
 
@@ -93,13 +167,10 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
   /* printf("System call number: %d\n", args[0]); */
 
-  if (!check_memory(args, 4)) {
-    printf("%s: exit(-1)\n", &thread_current()->name);
-
-    thread_exit();
-  }
+  check_int(args, false);
 
   if (args[0] == SYS_EXIT) {
+    check_int(args + 1, false);
     f->eax = args[1];
     set_exit_code(args[1]);
     printf("%s: exit(%d)\n", &thread_current()->name, args[1]);
@@ -112,37 +183,54 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
     switch (args[0]) {
       case SYS_WRITE:
+        check_int(args + 1, true);
+        check_int(args + 3, true);
+        check_memory_str(args + 2, true);
         f->eax = write(args[1], args[2], args[3]);
         break;
       case SYS_CREATE:
+        check_memory_str(args + 1, true);
+        check_int(args + 2, true);
         f->eax = filesys_create(args[1], args[2]);
         break;
       case SYS_OPEN:
+        check_memory_str(args + 1, true);
         f->eax = file_add(filesys_open(args[1]));
         break;
 
       case SYS_FILESIZE:
+        check_int(args + 1, true);
         f->eax = file_length(fd_to_file(args[1]));
         // TODO
         break;
 
       case SYS_READ:
+        check_int(args + 1, true);
+        check_int(args + 2, true);
+        check_int(args + 3, true);
+
+        check_memory(args[2], args[3], true);
         f->eax = file_read(fd_to_file(args[1]), args[2], args[3]);
         break;
 
       case SYS_SEEK:
+        check_int(args + 1, true);
+        check_int(args + 2, true);
         file_seek(fd_to_file(args[1]), args[2]);
         break;
 
       case SYS_TELL:
+        check_int(args + 1, true);
         f->eax = file_tell(fd_to_file(args[1]));
         break;
 
       case SYS_CLOSE:
-        file_close(fd_to_file(args[1]));
+        check_int(args + 1, true);
+        close_fd(args[1]);
         break;
 
       case SYS_REMOVE:
+        check_memory_str(args + 1, true);
         f->eax = filesys_remove(args[1]);
       default:
         break;
@@ -150,13 +238,16 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
 
     lock_release(&filesys_lock);
   } else if (args[0] == SYS_PRACTICE) {
+    check_int(args + 1, false);
     f->eax = args[1] + 1;
   } else if (args[0] == SYS_HALT) {
     shutdown_power_off();
   } else if (args[0] == SYS_EXEC) {
+    check_memory_str(args + 1, false);
     f->eax = process_execute(args[1]);
 
   } else if (args[0] == SYS_WAIT) {
+    check_int(args + 1, false);
     f->eax = process_wait(args[1]);
   }
 }

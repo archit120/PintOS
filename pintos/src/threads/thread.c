@@ -14,6 +14,8 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -186,6 +188,23 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   sf->eip = switch_entry;
   sf->ebp = 0;
 
+  t->file_allocd = 2;
+  t->parent_process = thread_current();
+  struct child_thread* cht = malloc(sizeof(struct child_thread));
+
+  if (cht == NULL)
+    return TID_ERROR;
+
+  cht->exit_code = -1; //assume if not given.
+  sema_init(&cht->wait, 0);
+  cht->tid = tid;
+  cht->waiting = 0;
+
+  cht->temp_check = 8345;
+  cht->loaded_result = false;
+  sema_init(&cht->load_sema, 0);
+  list_push_front(&thread_current()->child_lst, &cht->elem);
+
   /* Add to run queue. */
   thread_unblock(t);
 
@@ -266,6 +285,9 @@ struct thread* thread_from_tid(tid_t tid) {
 }
 
 struct child_thread* thread_child_id(struct thread* parent, tid_t tid) {
+  if (!is_thread(parent))
+    return NULL;
+
   struct child_thread* t = NULL;
   enum intr_level old_level;
   struct list_elem* e;
@@ -300,10 +322,17 @@ void thread_exit(void) {
   process_exit();
 #endif
 
+  // free all malloced memory
+
+  struct thread* t = thread_current();
+  struct child_thread* cht = NULL;
+  struct file_descriptor* fd = NULL;
+  struct list_elem* e;
+  intr_disable();
+
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
-  intr_disable();
   list_remove(&thread_current()->allelem);
 
   raise_waiter();
@@ -455,9 +484,6 @@ static void init_thread(struct thread* t, const char* name, int priority) {
   list_init(&t->child_lst);
   list_init(&t->files_lst);
   t->parent_process = NULL;
-  t->loaded = -1;
-  t->file_allocd = 2;
-  sema_init(&t->load, 0);
   // list t->child_lst
 
   t->magic = THREAD_MAGIC;
@@ -534,6 +560,14 @@ void thread_schedule_tail(struct thread* prev) {
     while (!list_empty(&prev->child_lst)) {
       struct list_elem* e = list_pop_front(&prev->child_lst);
       free(list_entry(e, struct child_thread, elem));
+    }
+
+    while (!list_empty(&prev->files_lst)) {
+      struct list_elem* e = list_pop_front(&prev->files_lst);
+      struct file_descriptor* fd = list_entry(e, struct file_descriptor, elem);
+      if (!fd->closed)
+        file_close(fd->fp);
+      free(fd);
     }
 
     palloc_free_page(prev);
