@@ -46,6 +46,18 @@ struct kernel_thread_frame {
   void* aux;             /* Auxiliary data for function. */
 };
 
+struct waiting_thread {
+  struct thread* th;
+  int64_t rise_on_tick;
+  // struct semaphore sema;
+  struct list_elem elem;
+};
+
+/* List of thread, tick tuple waiting to be risen */
+static struct list waiting_list;
+/* List of thread, tick tuple waiting to be freed */
+static struct list waiting_free_list;
+
 /* Statistics. */
 static long long idle_ticks;   /* # of timer ticks spent idle. */
 static long long kernel_ticks; /* # of timer ticks in kernel threads. */
@@ -91,12 +103,30 @@ void thread_init(void) {
   lock_init(&tid_lock);
   list_init(&ready_list);
   list_init(&all_list);
+  list_init(&waiting_list);
+  list_init(&waiting_free_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread();
   init_thread(initial_thread, "main", PRI_DEFAULT);
   initial_thread->status = THREAD_RUNNING;
   initial_thread->tid = allocate_tid();
+}
+
+void thread_sleep(int64_t ticks) {
+  struct waiting_thread* wt = malloc(sizeof(struct waiting_thread));
+  // sema_init(&wt->sema, 0);
+  enum intr_level old_level = intr_disable();
+
+  wt->rise_on_tick = timer_ticks() + ticks;
+  int tid = thread_current()->tid;
+  // printf("INIT: %d RISE: %d TID:%x \n", timer_ticks(), wt->rise_on_tick, wt->th);
+  wt->th = thread_current();
+
+  list_push_front(&waiting_list, &wt->elem);
+  // sema_down(&wt->elem);
+  thread_block();
+  intr_set_level(old_level);
 }
 
 /* Starts preemptive thread scheduling by enabling interrupts.
@@ -118,6 +148,7 @@ void thread_start(void) {
    Thus, this function runs in an external interrupt context. */
 void thread_tick(void) {
   struct thread* t = thread_current();
+  // printf("TTICK: %d\n", timer_ticks());
 
   /* Update statistics. */
   if (t == idle_thread)
@@ -129,8 +160,32 @@ void thread_tick(void) {
   else
     kernel_ticks++;
 
+  thread_ticks++;
+
+  int64_t total_ticks = timer_ticks();
+  enum intr_level old_level = intr_disable();
+  bool new_sleep_rise = false;
+  if (list_begin(&waiting_list) != list_end(&waiting_list)) {
+    struct list_elem* e;
+    for (e = list_begin(&waiting_list); e != list_end(&waiting_list);) {
+      struct list_elem* next = list_next(e);
+      struct waiting_thread* wthead = list_entry(e, struct waiting_thread, elem);
+      if (wthead->rise_on_tick <= timer_ticks()) {
+        // printf("RISING ON: %d TSID:%x\n", total_ticks, wthead->th);
+        list_remove(e);
+        thread_unblock(wthead->th);
+        list_push_front(&waiting_free_list, e);
+        // new_sleep_rise  = true;
+        // free(wthead);
+        // break;
+      }
+      e = next;
+    }
+  }
+  intr_set_level(old_level);
+
   /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
+  if (thread_ticks >= TIME_SLICE || new_sleep_rise)
     intr_yield_on_return();
 }
 
@@ -235,7 +290,6 @@ void thread_block(void) {
    update other data. */
 void thread_unblock(struct thread* t) {
   enum intr_level old_level;
-
   ASSERT(is_thread(t));
 
   old_level = intr_disable();
@@ -556,6 +610,8 @@ void thread_schedule_tail(struct thread* prev) {
   if (prev != NULL && prev->status == THREAD_DYING && prev != initial_thread) {
     ASSERT(prev != cur);
 
+#ifdef USERPROG
+
     // free elements on the child_lst too
     while (!list_empty(&prev->child_lst)) {
       struct list_elem* e = list_pop_front(&prev->child_lst);
@@ -568,6 +624,14 @@ void thread_schedule_tail(struct thread* prev) {
       if (!fd->closed)
         file_close(fd->fp);
       free(fd);
+    }
+#endif
+
+    // Free the waiting list
+
+    while (!list_empty(&waiting_free_list)) {
+      struct list_elem* e = list_pop_front(&waiting_free_list);
+      free(list_entry(e, struct waiting_thread, elem));
     }
 
     palloc_free_page(prev);
