@@ -107,6 +107,14 @@ struct thread {
   int file_allocd;
   struct list files_lst;
 
+  struct list_elem wait; /* List element. */
+  int sleep_till;
+
+  struct list_elem donator; /* List element for list of threads that are waiting on *this* thread */
+  struct list donators_lst; //List of threads that have donated priority to this thread.
+
+  int priority_original; // priority of thread if no donations
+
   struct file* tfp;
 
   /* Owned by thread.c. */
@@ -166,6 +174,8 @@ void thread_foreach(thread_action_func*, void*);
 
 int thread_get_priority(void);
 void thread_set_priority(int);
+
+void thread_set_priority_other(struct thread* t, int new_priority, int old_level);
 
 int thread_get_nice(void);
 void thread_set_nice(int);
