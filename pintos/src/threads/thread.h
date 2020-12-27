@@ -176,6 +176,8 @@ int thread_get_priority(void);
 void thread_set_priority(int);
 
 void thread_set_priority_other(struct thread* t, int new_priority, int old_level);
+int thread_highest_priority(struct thread* t);
+void thread_remove_donor(struct thread* donor);
 
 int thread_get_nice(void);
 void thread_set_nice(int);

@@ -13,7 +13,7 @@ struct semaphore {
 void sema_init(struct semaphore*, unsigned value);
 void sema_down(struct semaphore*);
 bool sema_try_down(struct semaphore*);
-void sema_up(struct semaphore*);
+struct thread* sema_up(struct semaphore*);
 void sema_self_test(void);
 
 /* Lock. */

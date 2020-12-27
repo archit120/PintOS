@@ -96,13 +96,15 @@ bool sema_try_down(struct semaphore* sema) {
    and wakes up one thread of those waiting for SEMA, if any.
 
    This function may be called from an interrupt handler. */
-void sema_up(struct semaphore* sema) {
+struct thread* sema_up(struct semaphore* sema) {
   enum intr_level old_level;
 
   ASSERT(sema != NULL);
 
   old_level = intr_disable();
+  struct thread* resumer = NULL;
   if (!list_empty(&sema->waiters)) {
+    // printf("RESUMING\n");
     struct list_elem* e;
     int max_priority = -1;
     struct list_elem* max_priority_elem = NULL;
@@ -113,13 +115,15 @@ void sema_up(struct semaphore* sema) {
       }
     }
 
-    struct thread* resumer = list_entry(max_priority_elem, struct thread, elem);
+    resumer = list_entry(max_priority_elem, struct thread, elem);
     list_remove(max_priority_elem);
 
     thread_unblock(resumer);
   }
   sema->value++;
   intr_set_level(old_level);
+
+  return resumer;
 }
 
 static void sema_test_helper(void* sema_);
@@ -191,9 +195,10 @@ void lock_acquire(struct lock* lock) {
   bool success = sema_try_down(&lock->semaphore);
   if (!success) {
     enum intr_level old_level = intr_disable();
-
-    if (thread_get_priority() > lock->holder->priority)
-      thread_set_priority_other(lock->holder, thread_get_priority(), old_level);
+    list_push_front(&lock->holder->donators_lst, &thread_current()->donator);
+    int new_priority = thread_highest_priority(lock->holder);
+    if (lock->holder->priority < new_priority)
+      thread_set_priority_other(lock->holder, new_priority, old_level);
     else
       intr_set_level(old_level);
     sema_down(&lock->semaphore);
@@ -231,11 +236,16 @@ void lock_release(struct lock* lock) {
 
   enum intr_level old_level = intr_disable();
 
-  sema_up(&lock->semaphore);
-  thread_set_priority(lock->holder_orig_priority);
-  lock->holder = NULL;
+  struct thread* resumed = sema_up(&lock->semaphore);
 
-  intr_set_level(old_level);
+  if (resumed != NULL) {
+    thread_remove_donor(resumed);
+  }
+  int newp = thread_highest_priority(lock->holder);
+
+  struct thread* c = lock->holder;
+  lock->holder = NULL;
+  thread_set_priority_other(c, newp, old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false
