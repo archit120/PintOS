@@ -115,6 +115,8 @@ struct thread {
 
   int priority_original; // priority of thread if no donations
 
+  struct lock* waiting_lock; // set non zero if waiting for a lock and blocked because of that
+
   struct file* tfp;
 
   /* Owned by thread.c. */
@@ -175,7 +177,7 @@ void thread_foreach(thread_action_func*, void*);
 int thread_get_priority(void);
 void thread_set_priority(int);
 
-void thread_set_priority_other(struct thread* t, int new_priority, int old_level);
+void thread_set_priority_other(struct thread* t, int new_priority);
 int thread_highest_priority(struct thread* t);
 void thread_remove_donor(struct thread* donor);
 

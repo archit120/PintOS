@@ -460,7 +460,7 @@ void thread_remove_donor(struct thread* donor) {
 }
 
 // Must be called with interrupts disabled. Will set to old_level on returning
-void thread_set_priority_other(struct thread* t, int new_priority, int old_level) {
+void thread_set_priority_other(struct thread* t, int new_priority) {
   struct list_elem* e;
   // printf("SETOTHER %d %d\n", t->tid, new_priority);
 
@@ -473,7 +473,6 @@ void thread_set_priority_other(struct thread* t, int new_priority, int old_level
     }
   }
   t->priority = new_priority;
-  intr_set_level(old_level);
 
   if (thread_current()->priority < highest_effective_priority_waiting())
     thread_yield();
@@ -482,10 +481,11 @@ void thread_set_priority_other(struct thread* t, int new_priority, int old_level
 /* Sets the current thread's priority to NEW_PRIORITY. ALSO UPDATES PRIORITY_ORIGINAL*/
 void thread_set_priority(int new_priority) {
   enum intr_level old_level = intr_disable();
-  printf("SET %d %d\n", thread_current()->tid, new_priority);
+  // printf("SET %d %d\n", thread_current()->tid, new_priority);
 
   thread_current()->priority_original = new_priority;
-  thread_set_priority_other(thread_current(), new_priority, old_level);
+  thread_set_priority_other(thread_current(), thread_highest_priority(thread_current()));
+  intr_set_level(old_level);
 }
 
 /* Returns the current thread's priority. */
