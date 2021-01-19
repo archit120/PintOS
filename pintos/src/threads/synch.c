@@ -125,7 +125,7 @@ struct thread* sema_up(struct semaphore* sema) {
   sema->value++;
   intr_set_level(old_level);
 
-  if (highest_effective_priority_waiting() > thread_current()->priority)
+  if (highest_effective_priority_waiting() > thread_current()->priority && !intr_context())
     thread_yield();
   return resumer;
 }
