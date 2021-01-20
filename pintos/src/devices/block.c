@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include "devices/ide.h"
 #include "threads/malloc.h"
+#include "filesys/sector_cache.h"
 
 /* A block device. */
 struct block {
@@ -18,6 +19,8 @@ struct block {
 
   unsigned long long read_cnt;  /* Number of sectors read. */
   unsigned long long write_cnt; /* Number of sectors written. */
+
+  sector_cache cache;
 };
 
 /* List of all block devices. */
@@ -90,14 +93,34 @@ static void check_sector(struct block* block, block_sector_t sector) {
   }
 }
 
+// ensures atleast one free slot in cache
+void block_cache_add(struct block* block, block_sector_t sector, void* buffer, uint8_t dirty) {
+  uint8_t evicted_buffer[BLOCK_SECTOR_SIZE];
+  block_sector_t evicted_sector;
+  uint8_t evicted_dirty;
+
+  uint8_t ret = cache_add(&block->cache, buffer, sector, dirty, &evicted_sector, &evicted_dirty,
+                          evicted_buffer);
+  if (ret && evicted_dirty) {
+    block->ops->write(block->aux, evicted_sector, evicted_buffer);
+    block->write_cnt++;
+  }
+}
+
+void block_cache_flush(struct block* block) {}
+
 /* Reads sector SECTOR from BLOCK into BUFFER, which must
    have room for BLOCK_SECTOR_SIZE bytes.
    Internally synchronizes accesses to block devices, so external
    per-block device locking is unneeded. */
 void block_read(struct block* block, block_sector_t sector, void* buffer) {
   check_sector(block, sector);
+  if (cache_read(&block->cache, sector, buffer))
+    return;
   block->ops->read(block->aux, sector, buffer);
   block->read_cnt++;
+
+  block_cache_add(block, sector, buffer, 0);
 }
 
 /* Write sector SECTOR to BLOCK from BUFFER, which must contain
@@ -108,8 +131,8 @@ void block_read(struct block* block, block_sector_t sector, void* buffer) {
 void block_write(struct block* block, block_sector_t sector, const void* buffer) {
   check_sector(block, sector);
   ASSERT(block->type != BLOCK_FOREIGN);
-  block->ops->write(block->aux, sector, buffer);
-  block->write_cnt++;
+  if (!cache_write(&block->cache, sector, buffer))
+    block_cache_add(block, sector, buffer, 1);
 }
 
 /* Returns the number of sectors in BLOCK. */
