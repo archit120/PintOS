@@ -10,6 +10,7 @@
 
 /* Partition that contains the file system. */
 struct block* fs_device;
+sector_cache filesys_cache;
 
 static void do_format(void);
 
@@ -19,6 +20,8 @@ void filesys_init(bool format) {
   fs_device = block_get_role(BLOCK_FILESYS);
   if (fs_device == NULL)
     PANIC("No file system device found, can't initialize file system.");
+
+  cache_init(&filesys_cache);
 
   inode_init();
   free_map_init();
@@ -33,8 +36,9 @@ void filesys_init(bool format) {
    to disk. */
 void filesys_done(void) {
   //flush cache
-  while (cache_any_dirty())
-    free_map_close();
+  free_map_close();
+
+  block_cache_flush(fs_device);
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.

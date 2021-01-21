@@ -68,4 +68,5 @@ struct block_operations {
 struct block* block_register(const char* name, enum block_type, const char* extra_info,
                              block_sector_t size, const struct block_operations*, void* aux);
 
+void block_cache_flush(struct block* block);
 #endif /* devices/block.h */

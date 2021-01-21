@@ -33,5 +33,5 @@ uint8_t cache_read(sector_cache* cache, block_sector_t sector, void* buffer);
 // returns true if sector exists in cache and writes it into buffer which must be atleast BLOCK_SECTOR_SIZE large
 uint8_t cache_write(sector_cache* cache, block_sector_t sector, void* buffer);
 
-uint8_t cache_any_dirty(sector_cache* cache);
+uint8_t cache_get_dirty(sector_cache* cache, void* buffer, block_sector_t* sector);
 #endif
