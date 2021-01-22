@@ -60,41 +60,46 @@ uint8_t cache_evict(sector_cache* cache, void* buffer, block_sector_t* evicted_s
   return ret;
 }
 
-// returns true if sector exists in cache and reads it into buffer which must be atleast BLOCK_SECTOR_SIZE large
-uint8_t cache_read(sector_cache* cache, block_sector_t sector, void* buffer) {
-  lock_acquire(&cache->cache_lock);
+int cache_find_index(sector_cache* cache, block_sector_t sector) {
   int i = 0;
   for (i = 0; i < CACHE_SIZE; i++)
     if (cache->cached[i] == sector && cache->valid[i])
       break;
 
   if (cache->cached[i] != sector || !cache->valid[i] || i == CACHE_SIZE) {
+    return CACHE_SIZE;
+  }
+  return i;
+}
+
+// returns true if sector exists in cache and reads it into buffer which must be atleast BLOCK_SECTOR_SIZE large
+uint8_t cache_read(sector_cache* cache, block_sector_t sector, void* buffer, int offset, int sz) {
+  lock_acquire(&cache->cache_lock);
+  int i = cache_find_index(cache, sector);
+  if (i == CACHE_SIZE) {
     //printf("CACHE MISS AT %d \n", sector);
     lock_release(&cache->cache_lock);
     return 0;
   }
   //printf("CACHE HIT AT %d\n", sector);
-  memcpy(buffer, &cache->buffer[BLOCK_SECTOR_SIZE * (i)], BLOCK_SECTOR_SIZE);
+  memcpy(buffer, &cache->buffer[BLOCK_SECTOR_SIZE * (i) + offset], sz);
   cache->recently_accessed[i] = 1;
   lock_release(&cache->cache_lock);
   return 1;
 }
 
 // returns true if sector exists in cache and writes it into buffer which must be atleast BLOCK_SECTOR_SIZE large
-uint8_t cache_write(sector_cache* cache, block_sector_t sector, void* buffer) {
+uint8_t cache_write(sector_cache* cache, block_sector_t sector, void* buffer, int offset, int sz) {
   lock_acquire(&cache->cache_lock);
-  int i = 0;
-  for (i = 0; i < CACHE_SIZE; i++)
-    if (cache->cached[i] == sector && cache->valid[i])
-      break;
-  if (cache->cached[i] != sector || !cache->valid[i] || i == CACHE_SIZE) {
-    //printf("CACHEW MISS AT %d %d\n", sector);
+  int i = cache_find_index(cache, sector);
+  if (i == CACHE_SIZE) {
+    //printf("CACHE MISS AT %d \n", sector);
     lock_release(&cache->cache_lock);
     return 0;
   }
   //printf("CACHEW HIT AT %d\n", sector);
 
-  memcpy(&cache->buffer[BLOCK_SECTOR_SIZE * (i)], buffer, BLOCK_SECTOR_SIZE);
+  memcpy(&cache->buffer[BLOCK_SECTOR_SIZE * (i) + offset], buffer, sz);
   cache->recently_accessed[i] = 1;
   cache->dirty[i] = 1;
   lock_release(&cache->cache_lock);

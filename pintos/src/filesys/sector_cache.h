@@ -28,10 +28,10 @@ uint8_t cache_evict(sector_cache* cache, void* buffer, block_sector_t* evicted_s
                     uint8_t* dirty);
 
 // returns true if sector exists in cache and reads it into buffer which must be atleast BLOCK_SECTOR_SIZE large
-uint8_t cache_read(sector_cache* cache, block_sector_t sector, void* buffer);
+uint8_t cache_read(sector_cache* cache, block_sector_t sector, void* buffer, int offset, int sz);
 
 // returns true if sector exists in cache and writes it into buffer which must be atleast BLOCK_SECTOR_SIZE large
-uint8_t cache_write(sector_cache* cache, block_sector_t sector, void* buffer);
+uint8_t cache_write(sector_cache* cache, block_sector_t sector, void* buffer, int offset, int sz);
 
 uint8_t cache_get_dirty(sector_cache* cache, void* buffer, block_sector_t* sector);
 #endif

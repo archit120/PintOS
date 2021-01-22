@@ -123,7 +123,7 @@ void block_read(struct block* block, block_sector_t sector, void* buffer) {
   check_sector(block, sector);
 
   if (block == fs_device) {
-    if (cache_read(&filesys_cache, sector, buffer))
+    if (cache_read(&filesys_cache, sector, buffer, 0, BLOCK_SECTOR_SIZE))
       return;
     block->ops->read(block->aux, sector, buffer);
     block->read_cnt++;
@@ -132,6 +132,23 @@ void block_read(struct block* block, block_sector_t sector, void* buffer) {
   } else {
     block->ops->read(block->aux, sector, buffer);
     block->read_cnt++;
+  }
+}
+
+void block_read_offsz(struct block* block, block_sector_t sector, void* buffer, int offset,
+                      int sz) {
+  check_sector(block, sector);
+
+  if (block == fs_device) {
+    if (cache_read(&filesys_cache, sector, buffer, offset, sz))
+      return;
+
+    // block is not in cache
+    uint8_t tempbuffer[BLOCK_SECTOR_SIZE];
+    block_read(block, sector, tempbuffer);
+    memcpy(buffer, tempbuffer + offset, sz);
+  } else {
+    ASSERT(0);
   }
 }
 
@@ -144,11 +161,30 @@ void block_write(struct block* block, block_sector_t sector, const void* buffer)
   check_sector(block, sector);
   ASSERT(block->type != BLOCK_FOREIGN);
   if (block == fs_device) {
-    if (!cache_write(&filesys_cache, sector, buffer))
+    if (!cache_write(&filesys_cache, sector, buffer, 0, BLOCK_SECTOR_SIZE))
       block_cache_add(block, sector, buffer, 1);
   } else {
     block->ops->write(block->aux, sector, buffer);
     block->write_cnt++;
+  }
+}
+
+void block_write_offsz(struct block* block, block_sector_t sector, const void* buffer, int offset,
+                       int sz) {
+  check_sector(block, sector);
+  ASSERT(block->type != BLOCK_FOREIGN);
+  if (block == fs_device) {
+    if (!cache_write(&filesys_cache, sector, buffer, offset, sz)) {
+      uint8_t tempbuffer[BLOCK_SECTOR_SIZE];
+
+      if (offset != 0) // || sz
+        block_read(block, sector, tempbuffer);
+
+      memcpy(tempbuffer + offset, buffer, sz);
+      block_write(block, sector, tempbuffer);
+    }
+  } else {
+    ASSERT(0);
   }
 }
 
