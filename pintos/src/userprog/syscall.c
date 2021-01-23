@@ -8,6 +8,7 @@
 #include "threads/pte.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/palloc.h"
 
 static struct lock filesys_lock;
@@ -232,6 +233,10 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       case SYS_REMOVE:
         check_memory_str(args + 1, true);
         f->eax = filesys_remove(args[1]);
+
+      case SYS_INUMBER:
+        check_int(args + 1, true);
+        f->eax = inode_get_inumber(file_get_inode(fd_to_file(args[1])));
       default:
         break;
     }
