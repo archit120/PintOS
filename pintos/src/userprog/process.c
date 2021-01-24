@@ -47,8 +47,6 @@ tid_t process_execute(const char* file_name) {
     sema_down(&t->load_sema);
     // printf("Value of loaded is %d from %x\n", t->loaded_result, (&t->temp_check));
 
-    ASSERT(t->temp_check == 11);
-
     if (!t->loaded_result)
       return -1;
   }
@@ -73,7 +71,6 @@ static void start_process(void* file_name_) {
   struct child_thread* ctt = thread_child_id(t->parent_process, t->tid);
   if (ctt != NULL) {
     ctt->loaded_result = success;
-    ctt->temp_check = 11;
 
     // printf("TID: %d, success: %d, memoryloc: %x\n", thread_current()->tid, ctt->loaded_result, &(ctt->temp_check));
     sema_up(&ctt->load_sema);

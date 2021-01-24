@@ -249,7 +249,6 @@ tid_t thread_create(const char* name, int priority, thread_func* function, void*
   cht->tid = tid;
   cht->waiting = 0;
 
-  cht->temp_check = 8345;
   cht->loaded_result = false;
   sema_init(&cht->load_sema, 0);
   list_push_front(&thread_current()->child_lst, &cht->elem);

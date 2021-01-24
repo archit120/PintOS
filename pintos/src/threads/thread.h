@@ -132,7 +132,6 @@ struct child_thread {
 
   bool loaded_result;
   struct semaphore load_sema;
-  int temp_check;
 };
 
 struct file_descriptor {

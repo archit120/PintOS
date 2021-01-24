@@ -42,7 +42,7 @@ void free_map_release(block_sector_t sector, size_t cnt) {
 
 /* Opens the free map file and reads it from disk. */
 void free_map_open(void) {
-  free_map_file = file_open(inode_open(FREE_MAP_SECTOR));
+  free_map_file = file_open(inode_open(FREE_MAP_SECTOR), 0);
   if (free_map_file == NULL)
     PANIC("can't open free map");
   if (!bitmap_read(free_map, free_map_file))
@@ -60,7 +60,7 @@ void free_map_create(void) {
     PANIC("free map creation failed");
 
   /* Write bitmap to file. */
-  free_map_file = file_open(inode_open(FREE_MAP_SECTOR));
+  free_map_file = file_open(inode_open(FREE_MAP_SECTOR), 0);
   if (free_map_file == NULL)
     PANIC("can't open free map");
   if (!bitmap_write(free_map, free_map_file))

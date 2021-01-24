@@ -68,9 +68,10 @@ struct file* filesys_open(const char* name) {
 
   if (dir != NULL)
     dir_lookup(dir, name, &inode);
+  block_sector_t dir_inode_sector = inode_get_inumber(dir_get_inode(dir));
   dir_close(dir);
 
-  return file_open(inode);
+  return file_open(inode, dir_inode_sector);
 }
 
 /* Deletes the file named NAME.

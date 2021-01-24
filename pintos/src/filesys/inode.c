@@ -169,7 +169,8 @@ void inode_extend(block_sector_t sector, off_t sz) {
   if (disk_inode->length < sz) {
     off_t done = 0;
     direct_inode(&done, &disk_inode->direct, sz, disk_inode->length);
-    single_indirect_inode(&done, &disk_inode->single_indirect, sz, disk_inode->length, 1);
+    single_indirect_inode(&done, &disk_inode->single_indirect, sz, disk_inode->length,
+                          disk_inode->length <= BLOCK_SECTOR_SIZE);
     double_indirect_inode(&done, &disk_inode->double_indirect, sz, disk_inode->length);
     disk_inode->length = sz;
     block_write(fs_device, sector, disk_inode);
