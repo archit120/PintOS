@@ -237,6 +237,9 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       case SYS_INUMBER:
         check_int(args + 1, true);
         f->eax = inode_get_inumber(file_get_inode(fd_to_file(args[1])));
+
+        // CASE SYS_CHDIR:
+
       default:
         break;
     }

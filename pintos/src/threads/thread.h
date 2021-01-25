@@ -118,6 +118,7 @@ struct thread {
   struct lock* waiting_lock; // set non zero if waiting for a lock and blocked because of that
 
   struct file* tfp;
+  block_sector_t current_working_dir; //
 
   /* Owned by thread.c. */
   unsigned magic; /* Detects stack overflow. */

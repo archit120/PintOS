@@ -17,12 +17,24 @@ struct dir_entry {
   block_sector_t inode_sector; /* Sector number of header. */
   char name[NAME_MAX + 1];     /* Null terminated file name. */
   bool in_use;                 /* In use or free? */
+  bool is_dir;                 /* Is entry a directory or not? */
 };
 
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
-bool dir_create(block_sector_t sector, size_t entry_cnt) {
-  return inode_create(sector, entry_cnt * sizeof(struct dir_entry));
+bool dir_create(block_sector_t sector, size_t entry_cnt, block_sector_t parent_sector) {
+  bool success = inode_create(sector, (entry_cnt + 2) * sizeof(struct dir_entry));
+  if (!success)
+    return false;
+
+  // directory was created succesfully. Add entries for "." and ".." files
+
+  struct dir* dir = dir_open(inode_open(sector));
+  if (!dir_add(dir, ".", sector))
+    return false;
+  if (!dir_add(dir, "..", parent_sector))
+    return false;
+  return true;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -65,6 +77,29 @@ struct inode* dir_get_inode(struct dir* dir) {
   return dir->inode;
 }
 
+/* Extracts a file name part from SRC into PART. Returns len if successful, 0 at
+end of string, -1 for a too-long file name part. */
+static int get_next_part(char part[NAME_MAX + 1], const char* src) {
+  char* dst = part;
+  const char* osrc = src;
+  /* Skip leading slashes. If it's all slashes, we're done. */
+  while (*src == '/')
+    src++;
+  if (*src == '\0')
+    return 0;
+  /* Copy up to NAME_MAX character from SRC to DST. Add null terminator. */
+  while (*src != '/' && *src != '\0') {
+    if (dst < part + NAME_MAX)
+      *dst++ = *src;
+    else
+      return -1;
+    src++;
+  }
+  *dst = '\0';
+  /* Advance source pointer. */
+  return src - osrc;
+}
+
 /* Searches DIR for a file with the given NAME.
    If successful, returns true, sets *EP to the directory entry
    if EP is non-null, and sets *OFSP to the byte offset of the
@@ -76,14 +111,24 @@ static bool lookup(const struct dir* dir, const char* name, struct dir_entry* ep
 
   ASSERT(dir != NULL);
   ASSERT(name != NULL);
+  char part[NAME_MAX + 1];
+  int nlen = get_next_part(part, name);
+  if (nlen == 0 || nlen == -1)
+    return false;
+  name += nlen;
 
   for (ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e; ofs += sizeof e)
-    if (e.in_use && !strcmp(name, e.name)) {
-      if (ep != NULL)
-        *ep = e;
-      if (ofsp != NULL)
-        *ofsp = ofs;
-      return true;
+    if (e.in_use && !strcmp(part, e.name)) {
+      int nlen = get_next_part(part, name);
+      if (nlen == 0) {
+        if (ep != NULL)
+          *ep = e;
+        if (ofsp != NULL)
+          *ofsp = ofs;
+        return true;
+      }
+      if (nlen > 0 && e.is_dir)
+        return lookup(dir_open(inode_open(e.inode_sector)), name, ep, ofsp);
     }
   return false;
 }
@@ -198,4 +243,22 @@ bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
     }
   }
   return false;
+}
+
+/* Searches DIR for a file with the given NAME
+   and returns true if one exists, false otherwise.
+   On success, sets *INODE to an inode for the file, otherwise to
+   a null pointer.  The caller must close *INODE. */
+bool thread_dir_lookup(const char* name, struct inode** inode) {
+  struct dir_entry e;
+
+  ASSERT(dir != NULL);
+  ASSERT(name != NULL);
+
+  if (lookup(dir, name, &e, NULL))
+    *inode = inode_open(e.inode_sector);
+  else
+    *inode = NULL;
+
+  return *inode != NULL;
 }
