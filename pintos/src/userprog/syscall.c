@@ -169,7 +169,6 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
   /* printf("System call number: %d\n", args[0]); */
 
   check_int(args, false);
-
   if (args[0] == SYS_EXIT) {
     check_int(args + 1, false);
     f->eax = args[1];
@@ -178,7 +177,8 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     thread_exit();
   } else if (args[0] == SYS_WRITE || args[0] == SYS_CREATE || args[0] == SYS_REMOVE ||
              args[0] == SYS_OPEN || args[0] == SYS_FILESIZE || args[0] == SYS_READ ||
-             args[0] == SYS_SEEK || args[0] == SYS_TELL || args[0] == SYS_CLOSE) {
+             args[0] == SYS_SEEK || args[0] == SYS_TELL || args[0] == SYS_CLOSE ||
+             args[0] == SYS_REMOVE || args[0] == SYS_INUMBER || args[0] == SYS_MKDIR) {
     // filesys is not thread-safe
     lock_acquire(&filesys_lock);
 
@@ -233,12 +233,19 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       case SYS_REMOVE:
         check_memory_str(args + 1, true);
         f->eax = filesys_remove(args[1]);
+        break;
 
       case SYS_INUMBER:
         check_int(args + 1, true);
         f->eax = inode_get_inumber(file_get_inode(fd_to_file(args[1])));
+        break;
 
         // CASE SYS_CHDIR:
+      case SYS_MKDIR:
+        check_memory_str(args + 1, true);
+        printf("sss %s\n", args[1]);
+        f->eax = mkdir(args[1]);
+        break;
 
       default:
         break;
