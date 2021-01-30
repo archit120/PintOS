@@ -25,8 +25,9 @@ struct inode_disk {
   off_t length;          /* File size in bytes. */
   block_sector_t single_indirect;
   block_sector_t double_indirect;
+  uint32_t is_dir;
   unsigned magic;       /* Magic number. */
-  uint32_t unused[123]; /* Not used. */
+  uint32_t unused[122]; /* Not used. */
 };
 
 /* Returns the number of sectors to allocate for an inode SIZE
@@ -45,6 +46,8 @@ struct inode {
 
   block_sector_t single_indirect;
   block_sector_t double_indirect;
+
+  uint32_t is_dir;
 
   off_t length; /* File size in bytes. */
 };
@@ -183,7 +186,7 @@ void inode_extend(block_sector_t sector, off_t sz) {
    device.
    Returns true if successful.
    Returns false if memory or disk allocation fails. */
-bool inode_create(block_sector_t sector, off_t length) {
+bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
   struct inode_disk* disk_inode = NULL;
   bool success = false;
 
@@ -198,6 +201,7 @@ bool inode_create(block_sector_t sector, off_t length) {
     size_t sectors = bytes_to_sectors(length);
     disk_inode->length = 0;
     disk_inode->magic = INODE_MAGIC;
+    disk_inode->is_dir = is_dir;
     block_write(fs_device, sector, disk_inode);
     // if (free_map_allocate(1, &disk_inode->direct)) {
     //   // if (sectors > 0) {
@@ -272,6 +276,7 @@ struct inode* inode_open(block_sector_t sector) {
 
   block_read(fs_device, inode->sector, &tempbuffer);
 
+  inode->is_dir = tempbuffer.is_dir;
   inode->direct = tempbuffer.direct;
   inode->length = tempbuffer.length;
   inode->single_indirect = tempbuffer.single_indirect;

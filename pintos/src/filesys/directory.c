@@ -6,6 +6,7 @@
 #include "filesys/inode.h"
 #include "devices/block.h"
 #include "threads/malloc.h"
+#include "threads/thread.h"
 
 /* A directory. */
 struct dir {
@@ -24,7 +25,7 @@ struct dir_entry {
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
 bool dir_create(block_sector_t sector, size_t entry_cnt, block_sector_t parent_sector) {
-  bool success = inode_create(sector, (entry_cnt + 2) * sizeof(struct dir_entry));
+  bool success = inode_create(sector, (entry_cnt + 2) * sizeof(struct dir_entry), true);
   if (!success)
     return false;
 
@@ -110,7 +111,18 @@ static int get_next_part(char part[NAME_MAX + 1], const char* src) {
 static bool lookup(const struct dir* dir, const char* name, struct dir_entry* ep, off_t* ofsp) {
   struct dir_entry e;
   size_t ofs;
-  printf("LOOKUP: %s\n", name);
+
+  // if passed directory is root then check name to figure out absolute path or relative path.
+  // If absolute path continues or else switch to a different dir*
+  // also if we swticehd directories here then we must close.
+  bool close_on_return = false;
+  if (inode_get_inumber(dir_get_inode(dir)) == ROOT_DIR_SECTOR && name[0] != '/') {
+    //printf("dir swap!\n");
+    close_on_return = true;
+    dir = dir_open(inode_open(thread_current()->current_working_dir));
+  }
+
+  //printf("LOOKUP: %s \n", name);
   ASSERT(dir != NULL);
   ASSERT(name != NULL);
   char part[NAME_MAX + 1];
@@ -120,9 +132,10 @@ static bool lookup(const struct dir* dir, const char* name, struct dir_entry* ep
   if (nlen == -1)
     return false;
   name += nlen;
-  printf("LOOKUP2: %s\n", part);
+  //printf("LOOKUP2: %s\n", part);
 
-  for (ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e; ofs += sizeof e)
+  for (ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e; ofs += sizeof e) {
+    //printf("SEE FILE: %s\n", e.name);
     if (e.in_use && !strcmp(part, e.name)) {
       int nlen = get_next_part(part, name);
       if (nlen == 0) {
@@ -130,11 +143,24 @@ static bool lookup(const struct dir* dir, const char* name, struct dir_entry* ep
           *ep = e;
         if (ofsp != NULL)
           *ofsp = ofs;
+        if (close_on_return)
+          dir_close(dir);
         return true;
       }
-      if (nlen > 0 && e.is_dir)
-        return lookup(dir_open(inode_open(e.inode_sector)), name, ep, ofsp);
+      if (nlen > 0 && e.is_dir) {
+        if (close_on_return)
+          dir_close(dir);
+
+        dir = dir_open(inode_open(e.inode_sector));
+        bool ret = lookup(dir, name, ep, ofsp);
+        dir_close(dir);
+        return ret;
+      }
     }
+  }
+  if (close_on_return)
+    dir_close(dir);
+
   return false;
 }
 
@@ -156,32 +182,43 @@ bool dir_lookup(const struct dir* dir, const char* name, struct inode** inode) {
   return *inode != NULL;
 }
 
-bool subdir_lookup(const char* name, struct inode** res, char* temp) {
+bool subdir_lookup(struct dir* dir, const char* name, struct inode** res, char* temp) {
   int len = strlen(name);
   int x = len - 1;
   while (name[x] != '/' && x > 0)
     x--;
+
+  if (x == 0) {
+    if (name[x] == '/')
+      x++;
+    for (int i = x; i <= len; i++)
+      temp[i - x] = name[i];
+    if (name[0] == '/')
+      *res = inode_open(ROOT_DIR_SECTOR);
+    else
+      *res = inode_open(inode_get_inumber(dir->inode));
+    return true;
+  }
+
   int y = x;
   for (int i = 0; i < x; i++)
     temp[i] = name[i];
   temp[x] = NULL;
-  struct dir* dir = dir_open_root();
   struct inode* inode = NULL;
-  printf("ADD0: %s\n", temp);
+  //printf("ADD0: %s\n", temp);
   if (dir != NULL) {
     if (!dir_lookup(dir, temp, &inode)) {
-      printf("ADD1: %s\n", temp);
+      //printf("ADD1: %s\n", temp);
 
       dir_close(dir);
       return false;
     }
   } else {
-    printf("ADD2: %s\n", temp);
+    //printf("ADD2: %s\n", temp);
 
     return false;
   }
 
-  dir_close(dir);
   *res = inode;
   if (name[x] == '/')
     x++;
@@ -215,12 +252,13 @@ bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector, boo
 
   struct inode* inode;
   char temp[NAME_MAX + 1];
-  printf("SADDIT: %s\n", name);
+  //printf("SADDIT: %s\n", name);
 
-  subdir_lookup(name, &inode, temp);
+  if (!subdir_lookup(dir, name, &inode, temp))
+    goto done;
   dir = dir_open(inode);
 
-  printf("ADDIT: %s %d\n", name, inode_get_inumber(dir->inode));
+  //printf("ADDIT: %s %s %d\n", name, temp, inode_get_inumber(dir->inode));
   /* Set OFS to offset of free slot.
      If there are no free slots, then it will be set to the
      current end-of-file.
@@ -235,7 +273,7 @@ bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector, boo
   /* Write slot. */
   e.in_use = true;
   e.is_dir = is_dir;
-  strlcpy(e.name, name, sizeof e.name);
+  strlcpy(e.name, temp, sizeof e.name);
   e.inode_sector = inode_sector;
   success = inode_write_at(dir->inode, &e, sizeof e, ofs) == sizeof e;
   dir_close(dir);
@@ -315,14 +353,38 @@ bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
 bool mkdir(const char* name) {
   struct inode* inode;
   char temp[NAME_MAX + 1];
-  subdir_lookup(name, &inode, temp);
-  struct dir* dir = dir_open(inode);
+  struct dir* dir = dir_open_root();
+  if (!subdir_lookup(dir, name, &inode, temp))
+    return false;
+  dir_close(dir);
+  //printf("Dir found: %d", inode_get_inumber(inode));
+  dir = dir_open(inode);
   block_sector_t inode_sector = 0;
-  printf("ADD0: %s\n", temp);
+  //printf("ADD0: %s\n", temp);
   if (!free_map_allocate(1, &inode_sector))
     return false;
-  printf("ADDIT: %d\n", inode_sector);
+  //printf("ADDIT mk: %d\n", inode_sector);
   bool suc = dir_add(dir, temp, inode_sector, true);
+  if (suc) {
+    //printf("NOw populating directory\n", inode_sector);
+    suc = dir_create(inode_sector, 2, inode_get_inumber(inode));
+  }
   dir_close(dir);
   return suc;
+}
+
+bool chdir(const char* name) {
+  struct dir* dir = dir_open_root();
+  struct inode* inode = NULL;
+  bool success = false;
+  if (dir != NULL) {
+    if (dir_lookup(dir, name, &inode)) {
+      thread_current()->current_working_dir = inode_get_inumber(inode);
+      //printf("working dir to %d\n",inode_get_inumber(inode) );
+      inode_close(inode);
+      success = true;
+    }
+  }
+  dir_close(dir);
+  return success;
 }
