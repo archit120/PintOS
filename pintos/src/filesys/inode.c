@@ -444,3 +444,5 @@ void inode_allow_write(struct inode* inode) {
 
 /* Returns the length, in bytes, of INODE's data. */
 off_t inode_length(const struct inode* inode) { return inode->length; }
+
+bool inode_is_dir(struct inode* inode) { return inode->is_dir; }

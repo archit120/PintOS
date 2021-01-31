@@ -3,8 +3,19 @@
 
 #include "filesys/off_t.h"
 #include "devices/block.h"
+#include <debug.h>
+#include "filesys/inode.h"
+#include "threads/malloc.h"
+#include "devices/block.h"
 
 struct inode;
+/* An open file. */
+struct file {
+  struct inode* inode;             /* File's inode. */
+  block_sector_t dir_inode_sector; /* Directory containing file inode */
+  off_t pos;                       /* Current position. */
+  bool deny_write;                 /* Has file_deny_write() been called? */
+};
 
 /* Opening and closing files. */
 struct file* file_open(struct inode* inode, block_sector_t dir_inode);

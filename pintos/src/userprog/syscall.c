@@ -8,6 +8,7 @@
 #include "threads/pte.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
 #include "filesys/inode.h"
 #include "threads/palloc.h"
 
@@ -179,7 +180,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
              args[0] == SYS_OPEN || args[0] == SYS_FILESIZE || args[0] == SYS_READ ||
              args[0] == SYS_SEEK || args[0] == SYS_TELL || args[0] == SYS_CLOSE ||
              args[0] == SYS_REMOVE || args[0] == SYS_INUMBER || args[0] == SYS_MKDIR ||
-             args[0] == SYS_CHDIR) {
+             args[0] == SYS_CHDIR || args[0] == SYS_ISDIR || args[0] == SYS_READDIR) {
     // filesys is not thread-safe
     lock_acquire(&filesys_lock);
 
@@ -250,6 +251,19 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       case SYS_CHDIR:
         check_memory_str(args + 1, true);
         f->eax = chdir(args[1]);
+        break;
+
+      case SYS_ISDIR:
+        check_int(args + 1, true);
+        f->eax = inode_is_dir(file_get_inode(fd_to_file(args[1])));
+        break;
+
+      case SYS_READDIR:
+        check_int(args + 1, true);
+        check_int(args + 2, true);
+        check_memory(args[2], 15, true);
+        f->eax = userprog_readdir(fd_to_file(args[1]), args[2]);
+        break;
       default:
         break;
     }

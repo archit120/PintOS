@@ -3,10 +3,12 @@
 #include <string.h>
 #include <list.h>
 #include "filesys/filesys.h"
+#include "filesys/file.h"
 #include "filesys/inode.h"
 #include "devices/block.h"
 #include "threads/malloc.h"
 #include "threads/thread.h"
+#include <stdbool.h>
 
 /* A directory. */
 struct dir {
@@ -329,6 +331,28 @@ bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
       return true;
     }
   }
+  return false;
+}
+
+/* Reads the next directory entry in DIR and stores the name in
+   NAME.  Returns true if successful, false if the directory
+   contains no more entries. */
+bool userprog_readdir(struct file* file, char name[NAME_MAX + 1]) {
+  if (!inode_is_dir(file_get_inode(file)))
+    return false;
+  struct dir_entry e;
+
+  while (inode_read_at(file_get_inode(file), &e, sizeof e, file->pos) == sizeof e) {
+
+    file->pos += sizeof e;
+    bool sdot = e.name[0] == '.' && e.name[1] == 0;
+    bool ddot = e.name[0] == '.' && e.name[1] == '.' && e.name[2] == 0;
+    if (e.in_use && !(sdot || ddot)) {
+      strlcpy(name, e.name, NAME_MAX + 1);
+      return true;
+    }
+  }
+
   return false;
 }
 
