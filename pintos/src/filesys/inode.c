@@ -245,6 +245,19 @@ bool inode_create(block_sector_t sector, off_t length, bool is_dir) {
   return success;
 }
 
+bool inode_already_open(block_sector_t sector) {
+  struct list_elem* e;
+  struct inode* inode;
+
+  for (e = list_begin(&open_inodes); e != list_end(&open_inodes); e = list_next(e)) {
+    inode = list_entry(e, struct inode, elem);
+    if (inode->sector == sector) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /* Reads an inode from SECTOR
    and returns a `struct inode' that contains it.
    Returns a null pointer if memory allocation fails. */

@@ -141,6 +141,9 @@ static bool lookup(const struct dir* dir, const char* name, struct dir_entry* ep
     if (e.in_use && !strcmp(part, e.name)) {
       int nlen = get_next_part(part, name);
       if (nlen == 0) {
+        bool sdot = e.name[0] == '.' && e.name[1] == 0;
+        bool ddot = e.name[0] == '.' && e.name[1] == '.' && e.name[2] == 0;
+
         if (ep != NULL)
           *ep = e;
         if (ofsp != NULL)
@@ -206,6 +209,9 @@ bool subdir_lookup(struct dir* dir, const char* name, struct inode** res, char* 
   for (int i = 0; i < x; i++)
     temp[i] = name[i];
   temp[x] = NULL;
+  bool sdot = temp[0] == '.' && temp[1] == 0;
+  bool ddot = temp[0] == '.' && temp[1] == '.' && temp[2] == 0;
+
   struct inode* inode = NULL;
   //printf("ADD0: %s\n", temp);
   if (dir != NULL) {
@@ -220,6 +226,8 @@ bool subdir_lookup(struct dir* dir, const char* name, struct inode** res, char* 
 
     return false;
   }
+  if (sdot || ddot || temp[0] == 0)
+    return false;
 
   *res = inode;
   if (name[x] == '/')
@@ -299,8 +307,12 @@ bool dir_remove(struct dir* dir, const char* name) {
   if (!lookup(dir, name, &e, &ofs))
     goto done;
 
+  if (e.inode_sector == thread_current()->current_working_dir || inode_already_open(e.inode_sector))
+    goto done;
+
   /* Open inode. */
   inode = inode_open(e.inode_sector);
+
   if (inode == NULL)
     goto done;
 

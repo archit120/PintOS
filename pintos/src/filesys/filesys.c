@@ -64,6 +64,9 @@ bool filesys_create(const char* name, off_t initial_size) {
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 struct file* filesys_open(const char* name) {
+  if (name[0] == 0)
+    return -1;
+
   struct dir* dir = dir_open_root();
   struct inode* inode = NULL;
 
@@ -80,6 +83,9 @@ struct file* filesys_open(const char* name) {
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool filesys_remove(const char* name) {
+  if (name[0] == '/' && name[1] == 0)
+    return false;
+
   struct dir* dir = dir_open_root();
   bool success = dir != NULL && dir_remove(dir, name);
   dir_close(dir);
