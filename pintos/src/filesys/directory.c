@@ -307,11 +307,20 @@ bool dir_remove(struct dir* dir, const char* name) {
   if (!lookup(dir, name, &e, &ofs))
     goto done;
 
-  if (e.inode_sector == thread_current()->current_working_dir || inode_already_open(e.inode_sector))
+  if (e.inode_sector == thread_current()->current_working_dir)
     goto done;
 
   /* Open inode. */
   inode = inode_open(e.inode_sector);
+
+  if (inode_is_dir(inode)) {
+    off_t ofs2;
+    // check if directory has any files except . and ..
+    for (ofs2 = 0; inode_read_at(dir->inode, &e, sizeof e, ofs2) == sizeof e; ofs2 += sizeof e)
+      if (e.in_use &&
+          !(e.name[0] == '.' && (e.name[1] == '\0' || (e.name[1] == '.' && e.name[2] == '\0'))))
+        goto done;
+  }
 
   if (inode == NULL)
     goto done;
